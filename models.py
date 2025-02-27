@@ -6,6 +6,7 @@ class ChatMessage(BaseModel):
     text: Optional[str] = None
     image: bool = False
     image_url: Optional[str] = None
+    time: Optional[str] = None
 
 
 class UserMessage(BaseModel):

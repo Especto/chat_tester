@@ -5,7 +5,7 @@ import os
 
 from playwright.async_api import async_playwright
 
-from config import USER_PROFILE
+from config import USER_PROFILE, LOGIN_LINK, START_MESSAGE, CHAT_HISTORY
 from gemini_model import generate_answer
 from models import ChatMessage, UserMessage, UserModel
 
@@ -14,17 +14,20 @@ LOG_FILE = "logs.logs"
 
 
 def save_chat_logs():
-    formatted_logs = []
-    with open(JSON_LOG_FILE, 'r', encoding='utf-8') as f:
-        logs = json.load(f)
+    try:
+        formatted_logs = []
+        with open(JSON_LOG_FILE, 'r', encoding='utf-8') as f:
+            logs = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        print(f"File {JSON_LOG_FILE} unavailable")
 
-        for log in logs:
-            sender = "🤖 User" if log["sender"] == "user" else "👩 Chat"
-            text = log["text"] if log["text"] else "*No text*"
-            has_image = "(PHOTO 📸)" if log.get("image") else ""
-            has_star = "⭐" if log.get("send_star") else ""
-            timestamp = datetime.datetime.fromisoformat(log["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
-            formatted_logs.append(f"{sender}: {text} {has_image}{has_star} ({timestamp})")
+    for log in logs:
+        sender = "🤖 User" if log["sender"] == "user" else "👩 Chat"
+        text = log["text"] if log["text"] else "*No text*"
+        has_image = "(PHOTO 📸)" if log.get("image") else ""
+        has_star = "⭐" if log.get("send_star") else ""
+        timestamp = datetime.datetime.fromisoformat(log["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
+        formatted_logs.append(f"{sender}: {text} {has_image}{has_star} ({timestamp})")
 
     with open(LOG_FILE, 'w', encoding='utf-8') as f:
         f.write("\n".join(formatted_logs))
@@ -65,10 +68,10 @@ async def get_message(page, chat_message: ChatMessage) -> ChatMessage:
         message = ChatMessage()
 
         if div_message:
-            text_element = await div_message.query_selector("p")
-            if text_element:
-                text_message = await text_element.text_content()
-                message.text = text_message
+            text_elements = await div_message.query_selector_all("p")
+            if text_elements:
+                message.text = await text_elements[0].text_content()
+                message.time = await text_elements[1].text_content()
 
             img_element = await div_message.query_selector("img")
             if img_element:
@@ -77,7 +80,7 @@ async def get_message(page, chat_message: ChatMessage) -> ChatMessage:
                     message.image = True
                     message.image_url = "https://golove.ai/" + image_url
 
-        if message.text == chat_message.text or not message.text:
+        if (message.text == chat_message.text and message.time == chat_message.time) or not message.text:
             continue
 
         await save_log({
@@ -90,9 +93,10 @@ async def get_message(page, chat_message: ChatMessage) -> ChatMessage:
         return chat_message
 
 
-async def send_message(message: UserMessage, text_input, send_button):
+async def send_message(page, message: UserMessage, text_input, send_button):
     if message.send_star:
         await send_button.click()
+        await asyncio.sleep(1)
     else:
         await text_input.fill(message.text)
         await asyncio.sleep(1)
@@ -123,7 +127,7 @@ async def main():
     async with async_playwright() as playwright:
         try:
             browser, page = await create_browser("browser_profile", playwright)
-
+            await page.goto(LOGIN_LINK)
             character_id = input("Character id: ")  # b951fec7-693e-4373-ac61-76f3036a3a5b
             chat_id = input("Chat id: ")  # 6045b863-7855-488b-ac26-eeb0b1deb529
             iterations = input("Number of messages: ")
@@ -140,25 +144,31 @@ async def main():
                 state="visible")
 
             chat_message = ChatMessage()
-            user_message = UserMessage(text="Hey, dear!", send_star=False)
-            await send_message(user_message, text_input, send_button)
+            user_message = UserMessage(text=START_MESSAGE, send_star=False)
+
+            CHAT_HISTORY.append({"role": "model", "parts": [user_message.text]})
+            await asyncio.sleep(2)
+            await send_message(page, user_message, text_input, send_button)
             for _ in range(int(iterations)):
                 chat_message = await get_message(page, chat_message)
-                print(f"🤖: {chat_message.text} {chat_message.image}")
+                print(f"👩: {chat_message.text} {chat_message.image}")
 
                 user_message = generate_answer(chat_message.text, USER_PROFILE, partner_profile, chat_message.image)
 
-                await send_message(user_message, text_input, send_button)
-                print(f"👩: {user_message.text} {user_message.send_star}")
+                await send_message(page, user_message, text_input, send_button)
+                print(f"🤖: {user_message.text} {user_message.send_star}")
 
+            chat_message = await get_message(page, chat_message)
+            print(f"👩: {chat_message.text} {chat_message.image}")
         except Exception as ex:
             print(ex)
+            input("Press Enter to exit...")
 
 
 if __name__ == "__main__":
     if os.path.exists(JSON_LOG_FILE):
         os.remove(JSON_LOG_FILE)
-    if os.path.exists('logs.logs'):
-        os.remove('logs.logs')
+    if os.path.exists(LOG_FILE):
+        os.remove(LOG_FILE)
     asyncio.run(main())
     save_chat_logs()

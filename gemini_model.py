@@ -2,24 +2,23 @@ from google import genai
 from google.genai import types
 import json
 
-from config import GEMINI_API_KEY, PROMPT
+from config import GEMINI_API_KEY, PROMPT, CHAT_HISTORY
 from models import UserMessage
 
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-chat_history = []
 
 
 def generate_answer(user_input, user_profile, partner_profile, photo=False):
-    chat_history.append({"role": "user", "parts": [user_input]})
+    CHAT_HISTORY.append({"role": "user", "parts": [user_input]})
 
     prompt = f"""
         {PROMPT}
         
         User information: {user_profile}
         Partner information: {partner_profile}
-        Chat history: {chat_history}
+        Chat history: {CHAT_HISTORY}
         User text: {user_input}
         Photo: {photo}
 
@@ -61,5 +60,5 @@ def generate_answer(user_input, user_profile, partner_profile, photo=False):
     )
 
     parsed_response: UserMessage = response.parsed
-    chat_history.append({"role": "model", "parts": [parsed_response.text]})
+    CHAT_HISTORY.append({"role": "model", "parts": [parsed_response.text if not parsed_response.send_star else "Sent star"]})
     return parsed_response
