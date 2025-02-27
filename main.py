@@ -14,12 +14,12 @@ LOG_FILE = "logs.logs"
 
 
 def save_chat_logs():
+    formatted_logs = []
     try:
-        formatted_logs = []
         with open(JSON_LOG_FILE, 'r', encoding='utf-8') as f:
             logs = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        print(f"File {JSON_LOG_FILE} unavailable")
+        print(f"Error: file {JSON_LOG_FILE} unavailable")
 
     for log in logs:
         sender = "🤖 User" if log["sender"] == "user" else "👩 Chat"
@@ -93,7 +93,7 @@ async def get_message(page, chat_message: ChatMessage) -> ChatMessage:
         return chat_message
 
 
-async def send_message(page, message: UserMessage, text_input, send_button):
+async def send_message(message: UserMessage, text_input, send_button):
     if message.send_star:
         await send_button.click()
         await asyncio.sleep(1)
@@ -123,14 +123,11 @@ async def parse_profile(page, link) -> UserModel:
     return UserModel(name=name, age=age, bio=bio)
 
 
-async def main():
+async def run_test(iterations, chat_id, character_id):
     async with async_playwright() as playwright:
         try:
             browser, page = await create_browser("browser_profile", playwright)
             await page.goto(LOGIN_LINK)
-            character_id = input("Character id: ")  # b951fec7-693e-4373-ac61-76f3036a3a5b
-            chat_id = input("Chat id: ")  # 6045b863-7855-488b-ac26-eeb0b1deb529
-            iterations = input("Number of messages: ")
 
             partner_profile = await parse_profile(page, character_id)
             print("Profile: ", partner_profile)
@@ -148,21 +145,30 @@ async def main():
 
             CHAT_HISTORY.append({"role": "model", "parts": [user_message.text]})
             await asyncio.sleep(2)
-            await send_message(page, user_message, text_input, send_button)
+
             for _ in range(int(iterations)):
+                await send_message(user_message, text_input, send_button)
+                print(f"🤖: {user_message.text} {user_message.send_star}")
+
                 chat_message = await get_message(page, chat_message)
                 print(f"👩: {chat_message.text} {chat_message.image}")
 
                 user_message = generate_answer(chat_message.text, USER_PROFILE, partner_profile, chat_message.image)
 
-                await send_message(page, user_message, text_input, send_button)
-                print(f"🤖: {user_message.text} {user_message.send_star}")
-
-            chat_message = await get_message(page, chat_message)
-            print(f"👩: {chat_message.text} {chat_message.image}")
         except Exception as ex:
-            print(ex)
-            input("Press Enter to exit...")
+            print("Error: ", ex)
+
+
+def set_parameters():
+    try:
+        iterations = int(input("Enter the number of iterations: "))
+        character_id = str(input("Character id: "))  # b951fec7-693e-4373-ac61-76f3036a3a5b
+        chat_id = str(input("Chat id: "))  # 6045b863-7855-488b-ac26-eeb0b1deb529
+    except:
+        print("Error: Incorrect data type")
+        iterations, chat_id, character_id = set_parameters()
+
+    return iterations, chat_id, character_id
 
 
 if __name__ == "__main__":
@@ -170,5 +176,29 @@ if __name__ == "__main__":
         os.remove(JSON_LOG_FILE)
     if os.path.exists(LOG_FILE):
         os.remove(LOG_FILE)
-    asyncio.run(main())
-    save_chat_logs()
+
+    character_id = None
+    chat_id = None
+    iterations = None
+
+    while True:
+        print("\n1. Start test")
+        print("2. Set parameters")
+        print("3. Exit")
+
+        choice = input("Choose an action: ")
+        print()
+
+        if choice == "1":
+            if not character_id:
+                print("Set the parameters")
+                continue
+            asyncio.run(run_test(iterations, chat_id, character_id))
+            save_chat_logs()
+            print("\nChat logs saved")
+        elif choice == "2":
+            iterations, chat_id, character_id = set_parameters()
+        elif choice == "3":
+            break
+        else:
+            print("Invalid choice")
