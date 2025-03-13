@@ -9,7 +9,6 @@ from models import UserMessage
 client = genai.Client(api_key=GEMINI_API_KEY)
 
 
-
 def generate_answer(user_input, user_profile, partner_profile, photo=False):
     CHAT_HISTORY.append({"role": "user", "parts": [user_input]})
 

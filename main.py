@@ -19,7 +19,8 @@ def save_chat_logs():
         with open(JSON_LOG_FILE, 'r', encoding='utf-8') as f:
             logs = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
-        print(f"Error: file {JSON_LOG_FILE} unavailable")
+        logs = []
+        print(f"[save_chat_logs]: file {JSON_LOG_FILE} unavailable")
 
     for log in logs:
         sender = "🤖 User" if log["sender"] == "user" else "👩 Chat"
@@ -114,13 +115,50 @@ async def parse_profile(page, link) -> UserModel:
     link = "https://golove.ai/character/" + link
     await page.goto(link)
 
-    name_age_element = await page.wait_for_selector(r"body > main > div > div.flex.justify-between.gap-\[16px\].w-full > div.flex.gap-\[16px\] > div > h4")
-    bio_element = await page.wait_for_selector(r"body > main > div > div.bg-white\/\[4\%\].rounded-\[16px\].p-\[16px\].flex.flex-col.gap-\[8px\] > p")
-    name_age = await name_age_element.text_content()
-    name, age = name_age.split(' ')
-    bio = await bio_element.text_content()
+    name_element = await page.wait_for_selector(r"body > main > div > div > div.bg-white\/\[4\%\].min-h-\[375px\].relative.h-full.max-h-\[375px\].w-full > div.flex.absolute.bg-\[\#0b0b0b\].bottom-\[-20px\].rounded-t-\[24px\].justify-between.gap-\[16px\].pt-\[20px\].w-full > div > div.flex.flex-col.gap-\[2px\] > h4")
+    age_element = await page.wait_for_selector(r"body > main > div > div > div.bg-white\/\[4\%\].min-h-\[375px\].relative.h-full.max-h-\[375px\].w-full > div.flex.absolute.bg-\[\#0b0b0b\].bottom-\[-20px\].rounded-t-\[24px\].justify-between.gap-\[16px\].pt-\[20px\].w-full > div > div.flex.flex-col.gap-\[2px\] > h4 > span")
+    bio_element = await page.wait_for_selector(r"body > main > div > div > div.flex.flex-col.gap-\[30px\].mx-\[16px\].mt-\[48px\] > div.bg-white\/\[4\%\].rounded-\[16px\].p-\[16px\].flex.flex-col.gap-\[12px\] > p")
+
+    name, age, bio = await name_element.text_content(), await age_element.text_content(), await bio_element.text_content()
 
     return UserModel(name=name, age=age, bio=bio)
+
+async def get_token_from_cookies(page):
+
+    cookies = await page.context.cookies()
+    token_cookie = None
+    for cookie in cookies:
+        if cookie["name"] == "token":
+            token_cookie = cookie
+            break
+
+    if token_cookie:
+        token_value = token_cookie["value"]
+        return token_value
+
+async def send_superlike(page, chat_id):
+    url = "https://api.golove.ai/recommendation/feedback"
+    token = await get_token_from_cookies(page)
+
+    payload = {
+        "recommendation_id": chat_id,
+        "feedback": "SUPERLIKE"
+    }
+    if token:
+        headers = {
+            "Authorization": f"Bearer {token}",  # Используем токен, полученный из cookies
+            "Content-Type": "application/json"
+        }
+        try:
+            response = await page.request.post(url, data=payload, headers=headers)
+
+            if response.status != 200:
+                print(f"Ошибка при отправке лайка персонажу. Статус код: {response.status}")
+                response_text = await response.text()
+                print("Текст ошибки:", response_text)
+
+        except Exception as e:
+            print(f"Произошла ошибка: {e}")
 
 
 async def run_test(iterations, chat_id, character_id):
@@ -144,7 +182,7 @@ async def run_test(iterations, chat_id, character_id):
             user_message = UserMessage(text=START_MESSAGE, send_star=False)
 
             CHAT_HISTORY.append({"role": "model", "parts": [user_message.text]})
-            await asyncio.sleep(2)
+            await asyncio.sleep(5)
 
             for _ in range(int(iterations)):
                 await send_message(user_message, text_input, send_button)
@@ -156,16 +194,16 @@ async def run_test(iterations, chat_id, character_id):
                 user_message = generate_answer(chat_message.text, USER_PROFILE, partner_profile, chat_message.image)
 
         except Exception as ex:
-            print("Error: ", ex)
+            print("[run_test]: ", ex)
 
 
 def set_parameters():
     try:
         iterations = int(input("Enter the number of iterations: "))
-        character_id = str(input("Character id: "))  # b951fec7-693e-4373-ac61-76f3036a3a5b
-        chat_id = str(input("Chat id: "))  # 6045b863-7855-488b-ac26-eeb0b1deb529
+        character_id = str(input("Character id: "))  # 2c919ceb-69b4-4f4c-96c3-27c8179b15d7
+        chat_id = str(input("Chat id: "))  # 50559917-2120-4259-a85f-beef22affe0d
     except:
-        print("Error: Incorrect data type")
+        print("[set_parameters]: Incorrect data type")
         iterations, chat_id, character_id = set_parameters()
 
     return iterations, chat_id, character_id
