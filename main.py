@@ -9,18 +9,22 @@ from config import USER_PROFILE, LOGIN_LINK, START_MESSAGE, CHAT_HISTORY
 from gemini_model import generate_answer
 from models import ChatMessage, UserMessage, UserModel
 
-JSON_LOG_FILE = "logs.json"
-LOG_FILE = "logs.logs"
+def get_log_filenames(chat_id):
+    """Return filenames for logs based on chat_id"""
+    json_log_file = f"logs/{chat_id}.json"
+    log_file = f"logs/{chat_id}.logs"
+    return json_log_file, log_file
 
-
-def save_chat_logs():
+def save_chat_logs(chat_id):
+    """Save formatted logs to a text file based on chat_id"""
+    json_log_file, log_file = get_log_filenames(chat_id)
     formatted_logs = []
     try:
-        with open(JSON_LOG_FILE, 'r', encoding='utf-8') as f:
+        with open(json_log_file, 'r', encoding='utf-8') as f:
             logs = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         logs = []
-        print(f"[save_chat_logs]: file {JSON_LOG_FILE} unavailable")
+        print(f"[save_chat_logs]: file {json_log_file} unavailable")
 
     for log in logs:
         sender = "🤖 User" if log["sender"] == "user" else "👩 Chat"
@@ -30,20 +34,21 @@ def save_chat_logs():
         timestamp = datetime.datetime.fromisoformat(log["timestamp"]).strftime("%Y-%m-%d %H:%M:%S")
         formatted_logs.append(f"{sender}: {text} {has_image}{has_star} ({timestamp})")
 
-    with open(LOG_FILE, 'w', encoding='utf-8') as f:
+    with open(log_file, 'w', encoding='utf-8') as f:
         f.write("\n".join(formatted_logs))
 
-
-async def save_log(log_data):
+async def save_log(log_data, chat_id):
+    """Save a log entry to JSON file based on chat_id"""
+    json_log_file, _ = get_log_filenames(chat_id)
     try:
-        with open(JSON_LOG_FILE, "r", encoding="utf-8") as f:
+        with open(json_log_file, "r", encoding="utf-8") as f:
             logs = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         logs = []
 
     logs.append(log_data)
 
-    with open(JSON_LOG_FILE, "w", encoding="utf-8") as f:
+    with open(json_log_file, "w", encoding="utf-8") as f:
         json.dump(logs, f, ensure_ascii=False, indent=4)
 
 
@@ -59,7 +64,13 @@ async def create_browser(profile_file, playwright):
     return context, page
 
 
-async def get_message(page, chat_message: ChatMessage) -> ChatMessage:
+async def start_browser():
+    playwright = await async_playwright().start()
+    browser, page = await create_browser("browser_profile", playwright)
+    return browser, page, playwright
+
+
+async def get_message(page, chat_message: ChatMessage, chat_id) -> ChatMessage:
     while True:
         await asyncio.sleep(1.5)
         block_of_message = await page.query_selector(
@@ -89,15 +100,20 @@ async def get_message(page, chat_message: ChatMessage) -> ChatMessage:
             "text": message.text,
             "image": message.image_url if message.image else None,
             "timestamp": datetime.datetime.now().isoformat()
-        })
+        }, chat_id)
         chat_message = message
         return chat_message
 
 
-async def send_message(message: UserMessage, text_input, send_button):
+async def send_message(message: UserMessage, text_input, send_button, page, chat_id):
     if message.send_star:
         await send_button.click()
         await asyncio.sleep(1)
+
+        send_stars_selector = r"//button[descendant::p[text()='Send stars']]"
+        send_stars_bt = await page.wait_for_selector(send_stars_selector)
+        await send_stars_bt.click()
+
     else:
         await text_input.fill(message.text)
         await asyncio.sleep(1)
@@ -108,16 +124,17 @@ async def send_message(message: UserMessage, text_input, send_button):
         "text": message.text if not message.send_star else None,
         "send_star": message.send_star,
         "timestamp": datetime.datetime.now().isoformat()
-    })
+    }, chat_id)
+
 
 
 async def parse_profile(page, link) -> UserModel:
     link = "https://golove.ai/character/" + link
     await page.goto(link)
 
-    name_element = await page.wait_for_selector(r"body > main > div > div > div.bg-white\/\[4\%\].min-h-\[375px\].relative.h-full.max-h-\[375px\].w-full > div.flex.absolute.bg-\[\#0b0b0b\].bottom-\[-20px\].rounded-t-\[24px\].justify-between.gap-\[16px\].pt-\[20px\].w-full > div > div.flex.flex-col.gap-\[2px\] > h4")
-    age_element = await page.wait_for_selector(r"body > main > div > div > div.bg-white\/\[4\%\].min-h-\[375px\].relative.h-full.max-h-\[375px\].w-full > div.flex.absolute.bg-\[\#0b0b0b\].bottom-\[-20px\].rounded-t-\[24px\].justify-between.gap-\[16px\].pt-\[20px\].w-full > div > div.flex.flex-col.gap-\[2px\] > h4 > span")
-    bio_element = await page.wait_for_selector(r"body > main > div > div > div.flex.flex-col.gap-\[30px\].mx-\[16px\].mt-\[48px\] > div.bg-white\/\[4\%\].rounded-\[16px\].p-\[16px\].flex.flex-col.gap-\[12px\] > p")
+    name_element = await page.wait_for_selector(r"body > main > div > div > div.bg-white\/\[4\%\].min-h-\[425px\].relative.h-full.max-h-\[425px\].w-full > div.flex.absolute.bg-\[\#0b0b0b\].bottom-\[-20px\].rounded-t-\[24px\].justify-between.gap-\[16px\].pt-\[20px\].w-full > div > div > h4")
+    age_element = await page.wait_for_selector(r"body > main > div > div > div.bg-white\/\[4\%\].min-h-\[425px\].relative.h-full.max-h-\[425px\].w-full > div.flex.absolute.bg-\[\#0b0b0b\].bottom-\[-20px\].rounded-t-\[24px\].justify-between.gap-\[16px\].pt-\[20px\].w-full > div > div > h4 > span")
+    bio_element = await page.wait_for_selector(r"body > main > div > div > div.flex.flex-col.mx-\[16px\].mt-\[48px\] > div.bg-white\/\[4\%\].rounded-\[16px\].p-\[16px\].flex.flex-col.gap-\[12px\] > p")
 
     name, age, bio = await name_element.text_content(), await age_element.text_content(), await bio_element.text_content()
 
@@ -136,72 +153,44 @@ async def get_token_from_cookies(page):
         token_value = token_cookie["value"]
         return token_value
 
-async def send_superlike(page, chat_id):
-    url = "https://api.golove.ai/recommendation/feedback"
-    token = await get_token_from_cookies(page)
 
-    payload = {
-        "recommendation_id": chat_id,
-        "feedback": "SUPERLIKE"
-    }
-    if token:
-        headers = {
-            "Authorization": f"Bearer {token}",  # Используем токен, полученный из cookies
-            "Content-Type": "application/json"
-        }
-        try:
-            response = await page.request.post(url, data=payload, headers=headers)
+async def run_test(page, iterations, chat_id, character_id):
+    try:
+        partner_profile = await parse_profile(page, character_id)
+        print("Profile: ", partner_profile)
 
-            if response.status != 200:
-                print(f"Ошибка при отправке лайка персонажу. Статус код: {response.status}")
-                response_text = await response.text()
-                print("Текст ошибки:", response_text)
+        await page.goto('https://golove.ai/chat/' + chat_id)
 
-        except Exception as e:
-            print(f"Произошла ошибка: {e}")
+        text_input = await page.wait_for_selector(
+            r"body > main > div:nth-child(3) > div > div.w-full.bg-white\/\[4\%\].border.border-white\/\[12\%\].hover\:border-white\/\[30\%\].focus-within\:border-white\/\[30\%\].transition-all.pt-\[8px\].px-\[16px\].rounded-\[16px\] > textarea")
+        send_button = await page.wait_for_selector(
+            r"body > main > div:nth-child(3) > div > div.flex.gap-\[16px\].items-end > div > button",
+            state="visible")
 
+        chat_message = ChatMessage()
+        user_message = UserMessage(text=START_MESSAGE, send_star=False)
 
-async def run_test(iterations, chat_id, character_id):
-    async with async_playwright() as playwright:
-        try:
-            browser, page = await create_browser("browser_profile", playwright)
-            await page.goto(LOGIN_LINK)
+        CHAT_HISTORY.append({"role": "model", "parts": [user_message.text]})
+        await asyncio.sleep(5)
 
-            partner_profile = await parse_profile(page, character_id)
-            print("Profile: ", partner_profile)
+        for _ in range(int(iterations)):
+            await send_message(user_message, text_input, send_button, page, chat_id)
+            print(f"🤖: {user_message.text} {user_message.send_star}")
 
-            await page.goto('https://golove.ai/chat/' + chat_id)
+            chat_message = await get_message(page, chat_message, chat_id)
+            print(f"👩: {chat_message.text} {chat_message.image}")
 
-            text_input = await page.wait_for_selector(
-                r"body > main > div:nth-child(3) > div > div.w-full.bg-white\/\[4\%\].border.border-white\/\[12\%\].hover\:border-white\/\[30\%\].focus-within\:border-white\/\[30\%\].transition-all.pt-\[8px\].px-\[16px\].rounded-\[16px\] > textarea")
-            send_button = await page.wait_for_selector(
-                r"body > main > div:nth-child(3) > div > div.flex.gap-\[16px\].items-end > div > button",
-                state="visible")
+            user_message = generate_answer(chat_message.text, USER_PROFILE, partner_profile, chat_message.image)
 
-            chat_message = ChatMessage()
-            user_message = UserMessage(text=START_MESSAGE, send_star=False)
-
-            CHAT_HISTORY.append({"role": "model", "parts": [user_message.text]})
-            await asyncio.sleep(5)
-
-            for _ in range(int(iterations)):
-                await send_message(user_message, text_input, send_button)
-                print(f"🤖: {user_message.text} {user_message.send_star}")
-
-                chat_message = await get_message(page, chat_message)
-                print(f"👩: {chat_message.text} {chat_message.image}")
-
-                user_message = generate_answer(chat_message.text, USER_PROFILE, partner_profile, chat_message.image)
-
-        except Exception as ex:
-            print("[run_test]: ", ex)
+    except Exception as ex:
+        print("[run_test]: ", ex)
 
 
 def set_parameters():
     try:
         iterations = int(input("Enter the number of iterations: "))
-        character_id = str(input("Character id: "))  # 2c919ceb-69b4-4f4c-96c3-27c8179b15d7
-        chat_id = str(input("Chat id: "))  # 50559917-2120-4259-a85f-beef22affe0d
+        character_id = str(input("Character id: "))  # b8e4d2a3-56f9-7821-64c5-9bd0e83f0c23
+        chat_id = str(input("Chat id: "))  # 9fa4eeef-9854-4b10-a61c-dcdd35edc892
     except:
         print("[set_parameters]: Incorrect data type")
         iterations, chat_id, character_id = set_parameters()
@@ -209,15 +198,11 @@ def set_parameters():
     return iterations, chat_id, character_id
 
 
-if __name__ == "__main__":
-    if os.path.exists(JSON_LOG_FILE):
-        os.remove(JSON_LOG_FILE)
-    if os.path.exists(LOG_FILE):
-        os.remove(LOG_FILE)
+async def main():
 
-    character_id = None
-    chat_id = None
-    iterations = None
+    browser, page, playwright = await start_browser()
+    await page.goto(LOGIN_LINK)
+    character_id, chat_id, iterations = None, None, None
 
     while True:
         print("\n1. Start test")
@@ -229,14 +214,21 @@ if __name__ == "__main__":
 
         if choice == "1":
             if not character_id:
-                print("Set the parameters")
+                print("Set the parameters first.")
                 continue
-            asyncio.run(run_test(iterations, chat_id, character_id))
-            save_chat_logs()
+            await run_test(page, iterations, chat_id, character_id)
+            save_chat_logs(chat_id)
             print("\nChat logs saved")
         elif choice == "2":
             iterations, chat_id, character_id = set_parameters()
         elif choice == "3":
+            await browser.close()
             break
         else:
             print("Invalid choice")
+
+    await browser.close()
+    await playwright.stop()
+
+if __name__ == "__main__":
+    asyncio.run(main())

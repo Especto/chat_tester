@@ -1,3 +1,5 @@
+import time
+
 from google import genai
 from google.genai import types
 import json
@@ -51,13 +53,24 @@ def generate_answer(user_input, user_profile, partner_profile, photo=False):
         response_mime_type='application/json',
         response_schema=UserMessage,
     )
+    retries = 7
+    delay = 1
+    for i in range(retries):
+        try:
+            response = client.models.generate_content(
+                model='gemini-2.0-flash',
+                contents=prompt,
+                config=generation_config,
+            )
+            parsed_response: UserMessage = response.parsed
+            CHAT_HISTORY.append(
+                {"role": "model", "parts": [parsed_response.text if not parsed_response.send_star else "Sent star"]})
+            return parsed_response
+        except Exception as e:
+            if i < retries - 1:
+                print(f"[generate_answer] Error 503, retrying in {delay} seconds...")
+                time.sleep(delay)
+                delay *= 2
+            else:
+                raise e
 
-    response = client.models.generate_content(
-        model='gemini-2.0-flash',
-        contents=prompt,
-        config=generation_config,
-    )
-
-    parsed_response: UserMessage = response.parsed
-    CHAT_HISTORY.append({"role": "model", "parts": [parsed_response.text if not parsed_response.send_star else "Sent star"]})
-    return parsed_response
